@@ -1,5 +1,3 @@
-#!/usr/bin/python3.5
-
 import logging
 
 log = logging.getLogger(__name__)
