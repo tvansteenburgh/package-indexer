@@ -1,10 +1,13 @@
 import abc
 import asyncio
 import io
+import logging
 import os
 import string
 
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 class Index:
@@ -75,6 +78,8 @@ class FilesystemIndex(Index):
             operations should take care not to block the event loop.
 
         """
+        log.debug('Initializing index at %s', str(root_path))
+
         self.root_path = Path(str(root_path))
         self.loop = loop
         self.executor = None

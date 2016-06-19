@@ -36,11 +36,9 @@ def parse_line(line):
     try:
         cmd, pkg, deps = line.rstrip().split('|')
     except ValueError:
-        log.error('Malformed line: %s', line)
         return None
 
     if cmd not in COMMANDS:
-        log.error('Invalid command: %s', line)
         return None
 
     if deps:
