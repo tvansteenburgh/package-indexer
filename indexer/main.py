@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import logging
 import os
+import signal
 import textwrap
 
 from .index import FilesystemIndex
@@ -55,17 +56,18 @@ def main():
     )
 
     loop = asyncio.get_event_loop()
+    for signame in ('SIGINT', 'SIGTERM'):
+        loop.add_signal_handler(getattr(signal, signame), loop.stop)
+
     index = FilesystemIndex(args.index_dir, loop)
     server = IndexServer(index, args.host, args.port, loop)
     server.start()
 
     try:
         loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-
-    server.stop()
-    loop.close()
+    finally:
+        server.stop()
+        loop.close()
 
 
 if __name__ == '__main__':
