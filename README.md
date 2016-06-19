@@ -1,5 +1,28 @@
 # package-tree indexer: DigitalOcean Coding Challenge Solution
 
+## Running the indexing server
+
+Requires python3.5. To run the indexing server with the default options,
+run the following command from this directory:
+
+    python3.5 -m indexer.main
+
+Pass `-h` to see more options.
+
+## Running the tests
+
+The test suite requires `tox`:
+
+    sudo apt install python-tox
+
+or
+
+    pip install tox
+
+then, run the following command from this directory:
+
+   tox
+
 ## Design Considerations
 
 ### Network IO
@@ -103,6 +126,12 @@ We'll implement the Shared Disk approach, partitioning the forward and
 reverse index data into one file per package. This approach seems to offer
 the best balance of scalability, reliability, performance, and
 simplicity/maintainability.
+
+Because we're using the filesystem as a data store, we have no reliable
+way to ensure data integrity if we allow multiple concurrent writes.
+Consequently, if we want to scale out our indexing service, we should
+configure our load balancer to send writes to a single host, and distribute
+reads among the remaining hosts.
 
 We should implement our indexing scheme in a such a way that it could
 easily be swapped out for another approach so that we can easily try
