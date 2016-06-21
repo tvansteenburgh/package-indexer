@@ -47,8 +47,15 @@ class Server:
 
                 await self.handle_line(data, reader, writer)
                 await writer.drain()
-        except ConnectionError:
-            pass
+        except ConnectionError as e:
+            log.debug(
+                '%s:%s Disconnected: %s',
+                writer.get_extra_info('peername'),
+                id(asyncio.Task.current_task(self.loop)),
+                str(e),
+            )
+        finally:
+            writer.close()
 
     async def handle_line(self, line, reader, writer):
         """Handle each line from a client
@@ -98,16 +105,6 @@ class IndexServer(Server):
         self.index = index
         self.message_count = 0
 
-    def _get_message_id(self):
-        """Return a unique integer message id
-
-        The id is unique to the server process. Useful for correlating
-        requests/responses in log messages.
-
-        """
-        self.message_count += 1
-        return self.message_count
-
     async def handle_line(self, line, reader, writer):
         """Handle each incoming line from a connected client
 
@@ -116,20 +113,24 @@ class IndexServer(Server):
         :param writer: A :class:`asyncio.StreamWriter` instance
 
         """
-        msg_id = self._get_message_id()
-        log.debug('%s:%s Received line: %s', id(writer), msg_id, line)
+        log.debug(
+            '%s:%s Received line: %s',
+            writer.get_extra_info('peername'),
+            id(asyncio.Task.current_task(self.loop)),
+            line,
+        )
 
         msg = parser.parse_line(line)
 
         if not msg:
-            self._write_line(writer, msg_id, 'ERROR')
+            self._write_line(writer, 'ERROR')
             return
 
         command_method = getattr(self, 'cmd_' + msg.command.lower())
         if await command_method(msg):
-            self._write_line(writer, msg_id, 'OK')
+            self._write_line(writer, 'OK')
         else:
-            self._write_line(writer, msg_id, 'FAIL')
+            self._write_line(writer, 'FAIL')
 
     async def cmd_index(self, msg):
         """Index a package
@@ -155,16 +156,20 @@ class IndexServer(Server):
         """
         return await self.index.query(msg.package)
 
-    def _write_line(self, writer, message_id, text):
+    def _write_line(self, writer, text):
         """Write ``text`` as \\n-terminated bytes on ``writer``
 
         :param writer: A :class:`asyncio.StreamWriter` instance
-        :param int message_id: Message id
         :param str text: Text data to write
 
         """
         line = (text + '\n').encode()
         writer.write(line)
 
-        log.debug('%s:%s Sent line: %s', id(writer), message_id, line)
+        log.debug(
+            '%s:%s Sent line: %s',
+            writer.get_extra_info('peername'),
+            id(asyncio.Task.current_task(self.loop)),
+            line,
+        )
         return
