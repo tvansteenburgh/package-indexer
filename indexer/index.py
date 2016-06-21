@@ -197,24 +197,27 @@ class FilesystemIndex(Index):
         """Add ``package`` to the reverse index file for each dependency
 
         """
-        def add_dependent(path, package):
-            with io.open(path, 'a+') as f:
-                f.seek(0)
-                content = f.read()
-                f.seek(0)
-                f.truncate()
-                if not content:
-                    f.write(package)
-                    return
-                else:
-                    deps = set(content.split(','))
-                    deps.add(package)
-                    f.write(','.join(deps))
+        def add_dependents(paths, package):
+            for path in paths:
+                with io.open(path, 'a+') as f:
+                    f.seek(0)
+                    content = f.read()
+                    f.seek(0)
+                    f.truncate()
+                    if not content:
+                        f.write(package)
+                        return
+                    else:
+                        deps = set(content.split(','))
+                        deps.add(package)
+                        f.write(','.join(deps))
 
-        for dep in dependencies:
-            file_path = self._reverse_index_path(dep)
-            await self.loop.run_in_executor(
-                self.executor, add_dependent, str(file_path), package)
+        paths = [
+            str(self._reverse_index_path(dep))
+            for dep in dependencies
+        ]
+        await self.loop.run_in_executor(
+            self.executor, add_dependents, paths, package)
 
         return True
 
@@ -225,8 +228,10 @@ class FilesystemIndex(Index):
 
         """
         file_path = str(self._reverse_index_path(package))
-        should_delete = False
+        if not os.path.exists(file_path):
+            return
 
+        should_delete = False
         with io.open(file_path, 'a+') as f:
             f.seek(0)
             content = f.read()
@@ -234,7 +239,7 @@ class FilesystemIndex(Index):
             f.truncate()
 
             deps = set(content.split(','))
-            deps.remove(dependent)
+            deps.discard(dependent)
             if not deps:
                 should_delete = True
             else:
