@@ -98,3 +98,88 @@ class FilesystemIndexTest(unittest.TestCase):
             self.coro(fsi.remove('mypackage3')))
         self.assertTrue(
             self.coro(fsi.remove('mypackage')))
+
+
+class MemoryIndexTest(unittest.TestCase):
+    def setUp(self):
+        self.loop = asyncio.get_event_loop()
+        self.coro = self.loop.run_until_complete
+
+    def _make_index(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+
+        return index.MemoryIndex(tmp, self.loop)
+
+    def test_init(self):
+        index = self._make_index()
+
+        for dir_ in ('forward', 'reverse'):
+            self.assertTrue(dir_ in index.data)
+
+    def test_query_nonexistent(self):
+        index = self._make_index()
+        self.assertFalse(
+            self.coro(index.query('mypackage')))
+
+    def test_index_already_indexed(self):
+        index = self._make_index()
+        self.assertTrue(
+            self.coro(index.index('mypackage', [])))
+        self.assertTrue(
+            self.coro(index.index('mypackage', [])))
+
+    def test_index_with_unindexed_deps(self):
+        index = self._make_index()
+        self.assertFalse(
+            self.coro(index.index('mypackage', ['dep1'])))
+
+    def test_index_with_no_deps(self):
+        index = self._make_index()
+        self.assertTrue(
+            self.coro(index.index('mypackage', [])))
+
+    def test_index_with_indexed_deps(self):
+        index = self._make_index()
+        self.assertTrue(
+            self.coro(index.index('mypackage', [])))
+        self.assertTrue(
+            self.coro(index.index('mypackage2', ['mypackage'])))
+
+    def test_index_multiple_pkgs_with_same_deps(self):
+        index = self._make_index()
+        self.assertTrue(
+            self.coro(index.index('mypackage', [])))
+        self.assertTrue(
+            self.coro(index.index('mypackage2', ['mypackage'])))
+        self.assertTrue(
+            self.coro(index.index('mypackage3', ['mypackage'])))
+
+        dependents = index.reverse['mypackage']
+        self.assertEqual(
+            sorted(dependents),
+            sorted(['mypackage2', 'mypackage3']))
+
+    def test_remove_nonexistent(self):
+        index = self._make_index()
+        self.assertTrue(
+            self.coro(index.remove('mypackage')))
+
+    def test_remove_without_removing_dependents(self):
+        index = self._make_index()
+        self.coro(index.index('mypackage', []))
+        self.coro(index.index('mypackage2', ['mypackage']))
+        self.assertFalse(
+            self.coro(index.remove('mypackage')))
+
+    def test_remove_after_removing_dependents(self):
+        index = self._make_index()
+        self.coro(index.index('mypackage', []))
+        self.coro(index.index('mypackage2', ['mypackage']))
+        self.coro(index.index('mypackage3', ['mypackage']))
+        self.assertTrue(
+            self.coro(index.remove('mypackage2')))
+        self.assertTrue(
+            self.coro(index.remove('mypackage3')))
+        self.assertTrue(
+            self.coro(index.remove('mypackage')))

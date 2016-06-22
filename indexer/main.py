@@ -12,7 +12,13 @@ import signal
 import textwrap
 
 from .index import FilesystemIndex
+from .index import MemoryIndex
 from .server import IndexServer
+
+INDEX_TYPES = {
+    'filesystem': FilesystemIndex,
+    'memory': MemoryIndex,
+}
 
 
 def setup_parser():
@@ -42,6 +48,12 @@ def setup_parser():
         choices=('INFO', 'DEBUG', 'WARN', 'ERROR', 'CRITICAL'),
         default='INFO',
     )
+    parser.add_argument(
+        '-t', '--index-type',
+        help='Type of index to use',
+        choices=INDEX_TYPES.keys(),
+        default=list(INDEX_TYPES.keys())[0],
+    )
 
     return parser
 
@@ -59,7 +71,8 @@ def main():
     for signame in ('SIGINT', 'SIGTERM'):
         loop.add_signal_handler(getattr(signal, signame), loop.stop)
 
-    index = FilesystemIndex(args.index_dir, loop)
+    index_class = INDEX_TYPES[args.index_type]
+    index = index_class(args.index_dir, loop)
     server = IndexServer(index, args.host, args.port, loop)
     server.start()
 

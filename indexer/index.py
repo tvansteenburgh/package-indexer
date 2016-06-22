@@ -1,6 +1,7 @@
 import abc
 import asyncio
 import io
+import json
 import logging
 import os
 import string
@@ -58,6 +59,168 @@ class Index:
         pass
 
 
+class MemoryIndex(Index):
+    """A package index that stores its contents in memory.
+
+    """
+    INDEX_FILE = 'index.json'
+
+    def __init__(self, root_path, loop):
+        """Initialize an index
+
+        This is called before the event loop starts, so we don't have to
+        worry about blocking here.
+
+        :param root_path: A string or Path object pointing to the root
+            directory of the index on disk. This may be an empty dir or an
+            already-existing index (full of dirs and files).
+        :param loop: The asyncio event loop in which we are running. File io
+            operations should take care not to block the event loop.
+
+        """
+        log.debug('Initializing MemoryIndex at %s', str(root_path))
+
+        self.root_path = Path(str(root_path))
+        self.index_path = self.root_path / self.INDEX_FILE
+        self.loop = loop
+        self.executor = None
+        self.lock = asyncio.Lock()
+        self.data = self._bootstrap()
+        self.forward = self.data['forward']
+        self.reverse = self.data['reverse']
+
+    def _bootstrap(self):
+        """Load an existing index from disk, or initialize a new one
+
+        """
+        if not self.index_path.exists():
+            return {
+                'forward': {},
+                'reverse': {},
+            }
+
+        def raise_invalid():
+            raise SystemExit(
+                "Invalid index file format: %s", str(self.index_path))
+
+        try:
+            data = json.loads(self.index_path.read_text())
+            if not ('forward' in data and 'reverse' in data):
+                raise_invalid()
+        except json.decoder.JSONDecodeError:
+            raise_invalid()
+
+        return data
+
+    async def index(self, package, dependencies):
+        """Add a new package to the index
+
+        :param str package: The package name
+        :param list dependencies: List of package dependencies (package names)
+        :return: True if the package could be indexed, or already exists in
+            the index. False if indexing failed because not all dependencies
+            are indexed.
+
+        """
+        if package in self.forward:
+            return True
+
+        for dep in dependencies:
+            if dep not in self.forward:
+                # One of our deps isn't indexed, can't continue
+                return False
+
+        self._forward_index(package, dependencies)
+        self._reverse_index(package, dependencies)
+
+        with (await self.lock):
+            await self._write_index()
+
+        return True
+
+    async def remove(self, package):
+        """Remove a package from the index
+
+        :param str package: The package name to remove
+        :return: True if the package could be removed from the index, or if the
+            package wasn't indexed to begin with. False if the package could
+            not be removed because some other indexed package depends on it.
+
+        """
+        if package not in self.forward:
+            # Package isn't indexed
+            return True
+
+        if self._is_depended_on(package):
+            return False
+
+        self._remove_package(package)
+        with (await self.lock):
+            await self._write_index()
+
+        return True
+
+    async def query(self, package):
+        """Query the index for existence of ``package``
+
+        :param str package: The package name
+        :return: True if package is indexed, else False.
+
+        """
+        await asyncio.sleep(0)
+        return package in self.forward
+
+    def _remove_package(self, package):
+        """Remove a package from the index
+
+        This involves two steps:
+
+            - For each dependency, remove package from its reverse index,
+              possibly deleting the entry if package was the only entry
+            - Delete the forward index for package
+
+        """
+        for dep in self.forward[package]:
+            reverse = set(self.reverse[dep])
+            reverse.discard(package)
+            if not reverse:
+                del self.reverse[dep]
+            else:
+                self.reverse[dep] = list(reverse)
+
+        del self.forward[package]
+
+    def _is_depended_on(self, package):
+        """Return True if ``package`` is depended on by another.
+
+        """
+        return package in self.reverse
+
+    def _forward_index(self, package, dependencies):
+        """Add package to the forward index
+
+        """
+        self.forward[package] = dependencies
+
+    def _reverse_index(self, package, dependencies):
+        """Add ``package`` to the reverse index file for each dependency
+
+        """
+        for dep in dependencies:
+            pkgs = set(self.reverse.get(dep, []))
+            pkgs.add(package)
+            self.reverse[dep] = list(pkgs)
+
+    async def _write_index(self):
+        """Write the index to disk
+
+        """
+        def write():
+            self.index_path.write_text(json.dumps(self.data))
+
+        return await self.loop.run_in_executor(self.executor, write)
+
+
 class FilesystemIndex(Index):
     """A package index that uses a filesystem for storage.
 
@@ -78,7 +241,7 @@ class FilesystemIndex(Index):
             operations should take care not to block the event loop.
 
         """
-        log.debug('Initializing index at %s', str(root_path))
+        log.debug('Initializing FilesystemIndex at %s', str(root_path))
 
         self.root_path = Path(str(root_path))
         self.loop = loop
